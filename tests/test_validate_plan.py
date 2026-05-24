@@ -115,3 +115,25 @@ def test_validate_warns_on_non_custom_for_unknown_name(tmp_repo):
     result = run_script("validate_plan.py", str(p))
     assert result.returncode == 2
     assert "custom=true" in result.stderr
+
+
+def test_validate_plan_rejects_unsupported_doc_types_version(tmp_repo, write_doc_plan):
+    """Override --doc-types pointing at a file with an unsupported version should fail."""
+    plan_path = write_doc_plan()
+    bad_dt = tmp_repo / "bad-doc-types.yaml"
+    bad_dt.write_text(
+        "version: 99\n"
+        "doc_types:\n"
+        "  - name: README\n"
+        "    canonical_filename: README.md\n"
+        "    category: Orientation\n"
+        "    description: x\n"
+        "    scan_patterns: [README.md]\n"
+        "    default_paths: []\n"
+        "    default_cadence: x\n"
+        "    tone: x\n"
+        "    generation_order: 1\n"
+    )
+    result = run_script("validate_plan.py", str(plan_path), "--doc-types", str(bad_dt))
+    assert result.returncode == 1
+    assert "version" in result.stderr.lower()

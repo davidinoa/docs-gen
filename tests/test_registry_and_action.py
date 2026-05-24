@@ -111,6 +111,57 @@ def test_generated_action_includes_path_mappings(tmp_repo, write_doc_plan):
     assert '"ARCHITECTURE.md"' in action
 
 
+def test_build_registry_dry_run_does_not_write(tmp_repo, write_doc_plan):
+    plan_path = write_doc_plan()
+    result = run_script("build_registry.py", str(plan_path), str(tmp_repo), "--dry-run")
+    assert result.returncode == 0
+    assert not (tmp_repo / "docs-registry.yaml").exists()
+    assert not (tmp_repo / "DOCS_REGISTRY.md").exists()
+
+
+def test_build_registry_appends_audit_log(tmp_repo, write_doc_plan):
+    audit_path = tmp_repo / "DOCS_AUDIT_LOG.md"
+    run_script("append_audit.py", "--log", str(audit_path), "--init")
+    plan_path = write_doc_plan()
+    result = run_script("build_registry.py", str(plan_path), str(tmp_repo),
+                        "--audit-log", str(audit_path), "--reviewer", "ci-bot")
+    assert result.returncode == 0
+    content = audit_path.read_text()
+    assert "docs-registry.yaml" in content
+    assert "ci-bot" in content
+    assert "Regenerated registry" in content
+
+
+def test_generate_action_dry_run(tmp_repo, write_doc_plan):
+    plan_path = write_doc_plan()
+    run_script("build_registry.py", str(plan_path), str(tmp_repo))
+    out_dir = tmp_repo / ".github" / "workflows"
+    result = run_script("generate_action.py",
+                        str(tmp_repo / "docs-registry.yaml"),
+                        str(out_dir), "--dry-run")
+    assert result.returncode == 0
+    assert not (out_dir / "docs-check.yml").exists()
+
+
+def test_xref_proposes_authoritative_doc(tmp_repo):
+    plan = {
+        "project_name": "x",
+        "docs": [
+            {"filename": "A.md", "disposition": "generate", "generate": True,
+             "owns": ["api design"], "paths": ["api/**"], "cadence": "on-change"},
+            {"filename": "B.md", "disposition": "generate", "generate": True,
+             "owns": ["api design"], "paths": ["api/**"], "cadence": "on-change"},
+        ],
+    }
+    plan_path = tmp_repo / "plan.json"
+    plan_path.write_text(json.dumps(plan))
+    run_script("build_registry.py", str(plan_path), str(tmp_repo))
+    md = (tmp_repo / "DOCS_REGISTRY.md").read_text()
+    # The xref rows should propose a doc rather than leave [designate authoritative doc]
+    assert "[designate authoritative doc]" not in md
+    assert "(proposed — confirm or override)" in md
+
+
 def test_generated_action_glob_translation(tmp_repo):
     """src/** must translate to src/.* (not src/.[^/]*)."""
     plan = {

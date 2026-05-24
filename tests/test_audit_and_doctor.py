@@ -1,5 +1,8 @@
 """Tests for append_audit.py and doctor.py."""
 import json
+import subprocess
+from datetime import date, timedelta
+
 import yaml
 from .conftest import run_script
 
@@ -106,6 +109,116 @@ def test_doctor_detects_stale_path(tmp_repo, write_md, write_doc_plan):
     result = run_script("doctor.py", str(tmp_repo))
     assert result.returncode == 1
     assert "package.json" in result.stdout
+
+
+def test_audit_init_dry_run(tmp_repo):
+    log_path = tmp_repo / "DOCS_AUDIT_LOG.md"
+    result = run_script("append_audit.py", "--log", str(log_path), "--init", "--dry-run")
+    assert result.returncode == 0
+    assert not log_path.exists()
+
+
+def test_audit_append_dry_run(tmp_repo):
+    log_path = tmp_repo / "DOCS_AUDIT_LOG.md"
+    run_script("append_audit.py", "--log", str(log_path), "--init")
+    pre = log_path.read_text()
+    result = run_script("append_audit.py", "--log", str(log_path), "--dry-run",
+                        "--docs", "X.md", "--change", "test", "--trigger", "test", "--reviewer", "w")
+    assert result.returncode == 0
+    assert log_path.read_text() == pre  # No changes written
+
+
+def test_doctor_full_healthy_passes(tmp_repo, write_md, write_doc_plan):
+    _setup_healthy_ecosystem(tmp_repo, write_md, write_doc_plan)
+    result = run_script("doctor.py", str(tmp_repo), "--full")
+    assert result.returncode == 0
+
+
+def test_doctor_full_detects_claim_conflict(tmp_repo, write_md, write_doc_plan):
+    _setup_healthy_ecosystem(tmp_repo, write_md, write_doc_plan)
+    # Inject conflicting database claims into two docs.
+    (tmp_repo / "ARCHITECTURE.md").write_text(
+        "# Architecture\n\n"
+        "We use Postgres. Postgres. Postgres. The Postgres database is our backbone.\n"
+    )
+    (tmp_repo / "DATA_MODEL.md").write_text(
+        "# Data Model\n\n"
+        "We use MongoDB. MongoDB. MongoDB. The MongoDB schema lives in collections.\n"
+    )
+    # Enroll DATA_MODEL.md so doctor's structural check doesn't fail first.
+    reg = yaml.safe_load((tmp_repo / "docs-registry.yaml").read_text())
+    reg["docs"].append({
+        "file": "DATA_MODEL.md",
+        "owns": ["data model"],
+        "paths": [],
+        "origin": "generated",
+        "cadence": "on-change",
+        "custom": False,
+        "last_reviewed": str(date.today()),
+        "reviewer": "",
+    })
+    (tmp_repo / "docs-registry.yaml").write_text(yaml.safe_dump(reg, sort_keys=False))
+    result = run_script("doctor.py", str(tmp_repo), "--full")
+    # Content validation high-severity rolls into issues → exit 1
+    assert result.returncode == 1
+    assert "claim_conflict" in result.stdout or "Conflicting" in result.stdout
+
+
+def test_doctor_full_no_docs_to_validate_skips_cleanly(tmp_repo, write_doc_plan):
+    """If the repo has no validatable docs, --full should not crash."""
+    plan_path = write_doc_plan({"docs": []})
+    run_script("build_registry.py", str(plan_path), str(tmp_repo))
+    run_script("append_audit.py", "--log", str(tmp_repo / "DOCS_AUDIT_LOG.md"), "--init")
+    out_dir = tmp_repo / ".github" / "workflows"
+    out_dir.mkdir(parents=True)
+    run_script("generate_action.py", str(tmp_repo / "docs-registry.yaml"), str(out_dir))
+    result = run_script("doctor.py", str(tmp_repo), "--full", "--json")
+    report = json.loads(result.stdout)
+    assert report["content_validation"]["ran"] is False
+
+
+def test_doctor_detects_stale_docs(tmp_repo, write_md, write_doc_plan):
+    """A registry entry with cadence=quarterly past the threshold is flagged."""
+    _setup_healthy_ecosystem(tmp_repo, write_md, write_doc_plan)
+    reg = yaml.safe_load((tmp_repo / "docs-registry.yaml").read_text())
+    # Force one doc to be stale: quarterly cadence + last_reviewed 200 days ago
+    for d in reg["docs"]:
+        if d["file"] == "ARCHITECTURE.md":
+            d["cadence"] = "quarterly"
+            d["last_reviewed"] = str(date.today() - timedelta(days=200))
+    (tmp_repo / "docs-registry.yaml").write_text(yaml.safe_dump(reg, sort_keys=False))
+    result = run_script("doctor.py", str(tmp_repo))
+    assert result.returncode == 1
+    assert "past their review cadence" in result.stdout
+    assert "ARCHITECTURE.md" in result.stdout
+
+
+def test_doctor_gitignore_excludes_files(tmp_repo, write_md, write_doc_plan):
+    """When inside a git checkout, .gitignore-excluded .md files don't count as unregistered."""
+    _setup_healthy_ecosystem(tmp_repo, write_md, write_doc_plan)
+    subprocess.run(["git", "init"], cwd=tmp_repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.test"], cwd=tmp_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_repo, check=True)
+    # Create a stray .md file that .gitignore excludes.
+    (tmp_repo / ".gitignore").write_text("ignored/\n")
+    (tmp_repo / "ignored").mkdir()
+    (tmp_repo / "ignored" / "PROCESS.md").write_text("# Ignored\n")
+    subprocess.run(["git", "add", "."], cwd=tmp_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "init", "--no-verify"], cwd=tmp_repo, check=True,
+                   capture_output=True)
+    result = run_script("doctor.py", str(tmp_repo))
+    # The gitignored doc must NOT be flagged as unregistered.
+    assert "ignored/PROCESS.md" not in result.stdout
+
+
+def test_doctor_detects_unsupported_registry_version(tmp_repo, write_md, write_doc_plan):
+    _setup_healthy_ecosystem(tmp_repo, write_md, write_doc_plan)
+    reg = yaml.safe_load((tmp_repo / "docs-registry.yaml").read_text())
+    reg["version"] = 99
+    (tmp_repo / "docs-registry.yaml").write_text(yaml.safe_dump(reg, sort_keys=False))
+    result = run_script("doctor.py", str(tmp_repo))
+    assert result.returncode == 2  # critical
+    assert "version" in result.stdout.lower() or "version" in result.stderr.lower()
 
 
 def test_doctor_handles_glob_patterns(tmp_repo, write_md):
