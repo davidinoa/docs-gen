@@ -28,6 +28,10 @@ COMMANDS: dict[str, str] = {
     "state":           "state",
     "template":        "template",
     "codeowners":      "codeowners",
+    "snapshot":        "snapshot",
+    "lookup":          "lookup",
+    "sync":            "sync",
+    "init":            "init",
 }
 
 
