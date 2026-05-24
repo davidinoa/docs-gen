@@ -35,7 +35,7 @@ jobs:
       - name: Install docs-gen
         run: |
           # Pin the version your team uses so behavior is reproducible.
-          pip install https://github.com/davidinoa/docs-gen/releases/download/v0.2.0/docs_gen-0.2.0-py3-none-any.whl
+          pip install https://github.com/davidinoa/docs-gen/releases/download/v0.3.0/docs_gen-0.3.0-py3-none-any.whl
 
       - name: Run doctor
         id: doctor

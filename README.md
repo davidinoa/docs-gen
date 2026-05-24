@@ -9,7 +9,7 @@ It's designed to be driven either by an LLM (orchestrating the interview and con
 ## Install
 
 ```bash
-pip install https://github.com/davidinoa/docs-gen/releases/download/v0.2.0/docs_gen-0.2.0-py3-none-any.whl
+pip install https://github.com/davidinoa/docs-gen/releases/download/v0.3.0/docs_gen-0.3.0-py3-none-any.whl
 ```
 
 Or from source:
@@ -22,13 +22,20 @@ pip install -e .
 
 Requires Python 3.10+ and pyyaml.
 
-## Quick start
+## Quick start (solo dev / hobby project)
 
 ```bash
-# Initialize state tracking in your repo
-docs-gen state init .
+docs-gen init --scaffold
+```
 
-# Discover existing docs
+That's it. `init` detects your project (Python / Node / Rust / Go / generic), picks the `minimal` preset (README + ARCHITECTURE + GOTCHAS), writes empty H1-only stubs, builds the registry, generates the GitHub Action, and initializes the audit log. Write content into the three docs and you're done.
+
+Want more docs? `--preset standard` adds CONTRIBUTING / ENVIRONMENT / RUNBOOK. `--preset full` uses every doc type in the catalog. `--interactive` asks three quick questions.
+
+## Quick start (team / existing project)
+
+```bash
+# Look at what's already there
 docs-gen scan . > .docs-meta/scan-results.json
 
 # Assess any existing spec/PRD
@@ -39,15 +46,11 @@ docs-gen assess docs/PRD.md --output .docs-meta/specs-assessment.json
 # Verify the plan is well-formed
 docs-gen validate-plan .docs-meta/doc-plan.json
 
-# Once docs are generated, check them for contradictions
-docs-gen validate *.md --output .docs-meta/validation-report.json
+# One-shot: build registry + generate action + init audit log
+docs-gen sync .docs-meta/doc-plan.json --output-dir .
 
-# Generate registry + GitHub Action from the plan
-docs-gen build-registry .docs-meta/doc-plan.json . --audit-log DOCS_AUDIT_LOG.md
-docs-gen generate-action docs-registry.yaml .github/workflows --audit-log DOCS_AUDIT_LOG.md
-
-# Initialize the audit log (or let the --audit-log flags above create one)
-docs-gen audit --log DOCS_AUDIT_LOG.md --init
+# Optional: route doc reviewers
+docs-gen codeowners docs-registry.yaml .github/CODEOWNERS
 
 # Ongoing: check ecosystem health
 docs-gen doctor . --full
@@ -59,16 +62,27 @@ Each subcommand has `--help` for details.
 
 | Subcommand | What it does |
 |------------|--------------|
-| `state init / status / advance / get / reset / revert` | Track workflow progress through the 10-step pipeline; `revert --step <s>` rewinds without deleting artifacts |
-| `scan <repo>` | Discover existing docs, classify against known types |
-| `assess <spec>` | Score a spec/PRD for completeness across 6 dimensions; suggest targeted interview questions for gaps |
-| `validate-plan <plan.json>` | Verify doc-plan.json structure before downstream use |
-| `build-registry <plan.json> <out>` | Generate `docs-registry.yaml` + `DOCS_REGISTRY.md` with auto cross-reference detection (proposes authoritative doc per overlap) |
-| `generate-action <registry.yaml> <out>` | Generate `.github/workflows/docs-check.yml` from the registry |
-| `validate <files...>` | Detect contradictions across docs: version drift, env-var duplication, claim conflicts |
-| `audit --log <p> [--init / --docs ... --change ... --trigger ... --reviewer ...]` | Maintain append-only audit log |
+| **Setup** | |
+| `init [--preset minimal\|standard\|full] [--scaffold]` | Zero-config bootstrap. Detects the repo, scaffolds a doc-plan, optionally writes stubs, runs `sync`. |
+| `sync <plan.json>` | One-shot wrapper: build-registry → generate-action → audit init. Passes through `--strict`, `--dry-run`, `--audit-log`. |
+| **Discovery / planning** | |
+| `scan <repo>` | Discover existing docs, classify against known types. |
+| `assess <spec>` | Score a spec/PRD for completeness across 6 dimensions; suggest targeted interview questions for gaps. |
+| `validate-plan <plan.json>` | Verify doc-plan.json structure before downstream use. |
+| **Generation** | |
+| `build-registry <plan.json> <out>` | Generate `docs-registry.yaml` + `DOCS_REGISTRY.md`. Auto-extracts a per-doc `summary`, proposes authoritative doc for each xref. |
+| `generate-action <registry.yaml> <out> [--strict]` | Generate `.github/workflows/docs-check.yml`. `--strict` makes the check fail PRs that touch code without updating affected docs. |
+| `codeowners <registry.yaml> [<out>]` | Export `.github/CODEOWNERS` from registry entries with `owners:`. |
+| `template list / show <name> [--template-dir <dir>]` | List or print packaged doc and workflow templates; teams can override via `--template-dir`. |
+| **Use during code work** | |
+| `lookup --path X \| --owns Y \| --query Z [--json]` | Find docs in the registry. The agent-facing interface — pull only relevant docs into context before editing code. |
+| **Validation** | |
+| `validate <files...>` | Detect contradictions across docs: version drift, env-var duplication, claim conflicts. |
 | `doctor <repo> [--full]` | Health checks: structural (default) or content (`--full`). Honors `.gitignore` inside git checkouts. |
-| `template list / show <name> [--template-dir <dir>]` | List or print packaged doc and workflow templates; teams can override individual files via `--template-dir` |
+| **Maintenance** | |
+| `audit --log <p> [--init / --docs ... --change ... --trigger ... --reviewer ...]` | Maintain append-only audit log. |
+| `snapshot <name> [--git-ref <tag>] [--list]` | Freeze the registry + every referenced doc under `.docs-meta/snapshots/<name>/`. |
+| `state init / status / advance / get / reset / revert` | Track workflow progress through the 10-step pipeline; `revert --step <s>` rewinds without deleting artifacts. |
 
 ## Global flags
 
@@ -86,20 +100,55 @@ docs-gen --log-format=json doctor . --full --output health.json
 docs-gen --quiet build-registry .docs-meta/doc-plan.json .
 ```
 
-## File-writing flags (G3, G5)
+## File-writing flags
 
 Commands that write or mutate files share two opt-in flags:
 
 | Flag | Applies to | Behavior |
 |------|------------|----------|
-| `--dry-run` | `build-registry`, `generate-action`, `audit --init`, `audit` (append), `state init` | Print would-write paths without touching the filesystem |
-| `--audit-log <path>` | `build-registry`, `generate-action` | After a successful write, append an audit entry to the named log. Combine with `--reviewer "..."` to record who triggered it. |
+| `--dry-run` | `init`, `sync`, `build-registry`, `generate-action`, `audit --init`, `audit` (append), `state init`, `snapshot`, `codeowners` | Print would-write paths without touching the filesystem |
+| `--audit-log <path>` | `build-registry`, `generate-action`, `sync` | After a successful write, append an audit entry to the named log. Combine with `--reviewer "..."` to record who triggered it. |
 
 ```bash
 docs-gen build-registry .docs-meta/doc-plan.json . --dry-run
 docs-gen generate-action docs-registry.yaml .github/workflows \
     --audit-log DOCS_AUDIT_LOG.md --reviewer "ci-bot"
 ```
+
+## Agentic workflows
+
+Agents working in a repo with `docs-gen` shouldn't read every doc — they should consult the registry to find the relevant ones.
+
+```bash
+docs-gen lookup --path src/auth/login.ts --json
+docs-gen lookup --owns "rate limiting"
+docs-gen lookup --query "deployment"
+```
+
+Each call returns docs that match by `paths` glob, `owns` topic, or summary substring. Output is human-readable by default, `--json` for scripts. The companion **`repo-docs-consumer`** skill packages this into a "before-edit" loop for Claude and other LLMs.
+
+Exit codes: `0` = matches found, `2` = no matches.
+
+## Doc ownership and CODEOWNERS
+
+Add `owners: [@alice, @team-arch]` per doc in the plan; the field flows through into the registry and `DOCS_REGISTRY.md`. Then:
+
+```bash
+docs-gen codeowners docs-registry.yaml .github/CODEOWNERS
+```
+
+The generated `CODEOWNERS` routes a reviewer when the doc file itself is edited. Pair with `generate-action --strict` to also enforce that touching the doc's code paths requires updating the doc.
+
+## Snapshots
+
+When you tag a release, freeze the docs so future-you can diff:
+
+```bash
+docs-gen snapshot v1.0.0 --git-ref v1.0.0
+docs-gen snapshot --list  # see every snapshot
+```
+
+Output lives under `.docs-meta/snapshots/<name>/` with the registry plus a copy of every referenced doc and a `manifest.json`.
 
 ## Custom doc types and claim categories
 
@@ -142,6 +191,8 @@ docs-gen/
 │   ├── cli.py                ← Unified CLI dispatcher + global flag parsing
 │   ├── log.py                ← Centralized status logger (--verbose/--quiet/--log-format)
 │   ├── commands/             ← One module per subcommand
+│   │   ├── init.py           ← Zero-config bootstrap
+│   │   ├── sync.py           ← One-shot build-registry + generate-action + audit
 │   │   ├── scan.py
 │   │   ├── assess.py
 │   │   ├── validate_plan.py
@@ -150,6 +201,9 @@ docs-gen/
 │   │   ├── validate_docs.py
 │   │   ├── audit.py
 │   │   ├── doctor.py
+│   │   ├── lookup.py         ← Registry-aware search for agents
+│   │   ├── codeowners.py     ← Export .github/CODEOWNERS
+│   │   ├── snapshot.py       ← Freeze docs at a release
 │   │   ├── state.py
 │   │   └── template.py
 │   ├── config/               ← Packaged YAML configs (single source of truth)
@@ -201,11 +255,14 @@ Conventions are consistent within each command and surface as the process exit s
 
 | Command | 0 | 1 | 2 |
 |---------|---|---|---|
+| `init` | success | error (plan already exists, no `--force`; bad repo) | — |
+| `sync` | every step succeeded | one of the inner steps failed (error already logged) | — |
 | `scan` | success | error (config missing, parse failure) | — |
 | `assess` | `comprehensive` (≥75%) | `partial` (40–74%) | `sparse` (<40%) |
 | `validate-plan` | plan is valid | errors present (must fix) | warnings only (review recommended) |
 | `validate` (docs) | no high/medium issues | medium issues only | one or more high-severity issues |
-| `build-registry`, `generate-action`, `audit`, `template` | success | error (missing input, parse failure, IO error) | — |
+| `build-registry`, `generate-action`, `audit`, `template`, `codeowners`, `snapshot` | success | error (missing input, parse failure, IO error) | — |
+| `lookup` | matches found | misuse (no filter given) | no matches found |
 | `state` (init, advance, get, reset, revert) | success | misuse or already-exists | advance skipping ahead without `--force` |
 | `doctor` | healthy | non-critical issues found (stale docs, unregistered files, etc.) | critical (registry missing, registry unparsable, registry version unsupported) |
 

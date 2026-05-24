@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-24
+
+### Added
+- **Agentic workflow primitives**:
+  - `summary:` field per registry entry, auto-extracted from each doc's
+    first paragraph at `build-registry` time (or set explicitly via
+    `summary:` in the doc-plan).
+  - `docs-gen lookup --path X | --owns Y | --query Z [--json]` — find
+    docs in the registry by code path glob, ownership topic, or
+    summary substring. Exit code 0 on matches, 2 on no matches.
+  - Companion `repo-docs-consumer.skill` ships separately, teaching
+    LLM agents to consult the registry before editing code.
+- **Solo-dev bootstrap**:
+  - `docs-gen init [--preset minimal|standard|full] [--scaffold]
+    [--interactive] [--name <n>] [--force]` detects the project
+    (Python / Node / Rust / Go / Java / Ruby / generic), writes a
+    sensible doc-plan, optionally scaffolds H1-only doc stubs, then
+    runs `sync`. `minimal` ships three docs; `full` ships fourteen.
+  - `docs-gen sync <plan>` runs `build-registry` →
+    `generate-action` → `audit --init` in one command. Passes
+    through `--strict`, `--dry-run`, `--audit-log`, `--reviewer`.
+- **Enforcement and ownership**:
+  - `generate-action --strict` emits a workflow that fails the PR
+    check when affected docs aren't updated, instead of just
+    commenting. Default behavior is unchanged (soft nudge).
+  - `owners: [@alice, @team-arch]` field per registry entry.
+  - `docs-gen codeowners <registry.yaml> [<out>]` exports a
+    `.github/CODEOWNERS` file from registry entries with `owners`.
+    Stdout mode via `--stdout`.
+- **Long-term comprehension**:
+  - `docs-gen snapshot <name> [--git-ref <tag>]` freezes the
+    registry plus every referenced doc under
+    `.docs-meta/snapshots/<name>/` with a `manifest.json`. `--list`
+    shows existing snapshots.
+- `DOCS_REGISTRY.md` now renders a "Doc Summaries" section (and a
+  "Doc Owners" section when any doc declares owners).
+
+### Changed
+- README rewritten around the two-track quick start: solo dev via
+  `init`, team via `sync`. Subcommand table reorganized by lifecycle
+  phase (Setup / Discovery / Generation / Use / Validation /
+  Maintenance). Exit codes updated for every new subcommand.
+
 ## [0.2.1] - 2026-05-24
 
 ### Changed
