@@ -1,0 +1,258 @@
+version: 1
+
+# All scripts read from this file. To add a new standard doc type, edit here.
+# Order matters: this is the order docs appear in checklists and generation order.
+
+doc_types:
+  - name: SPECS
+    canonical_filename: SPECS.md
+    category: Specifications
+    description: Purpose, users, requirements, constraints, decisions
+    scan_patterns:
+      - SPECS.md
+      - SPEC.md
+      - PRD.md
+      - prd.md
+      - docs/specs.md
+      - docs/SPECS.md
+      - docs/prd.md
+      - REQUIREMENTS.md
+      - requirements.md
+      - docs/requirements.md
+      - PRODUCT_SPEC.md
+      - product-spec.md
+      - docs/product-spec.md
+      - RFC.md
+    default_paths: []
+    default_cadence: on-requirement-change
+    tone: structured, comprehensive
+    generation_order: 1
+
+  - name: README
+    canonical_filename: README.md
+    category: Orientation
+    description: Project overview, install, run, test — the front door
+    scan_patterns:
+      - README.md
+      - README.rst
+      - README.txt
+      - readme.md
+    default_paths:
+      - package.json
+      - pyproject.toml
+      - Cargo.toml
+      - go.mod
+    default_cadence: major-changes
+    tone: friendly, instructional, welcoming
+    generation_order: 2
+
+  - name: CONTRIBUTING
+    canonical_filename: CONTRIBUTING.md
+    category: Orientation
+    description: Branching, commit conventions, PR etiquette
+    scan_patterns:
+      - CONTRIBUTING.md
+      - CONTRIBUTING.rst
+      - .github/CONTRIBUTING.md
+    default_paths:
+      - .github/**
+      - CI config files
+    default_cadence: on-process-change
+    tone: friendly, instructional
+    generation_order: 5
+
+  - name: ONBOARDING
+    canonical_filename: ONBOARDING.md
+    category: Orientation
+    description: Step-by-step guide for new devs
+    scan_patterns:
+      - ONBOARDING.md
+      - docs/onboarding.md
+      - GETTING_STARTED.md
+      - docs/getting-started.md
+    default_paths: []
+    default_cadence: quarterly
+    tone: friendly, instructional, welcoming
+    generation_order: 6
+
+  - name: ARCHITECTURE
+    canonical_filename: ARCHITECTURE.md
+    category: Architecture & Design
+    description: System design, key decisions, how pieces fit
+    scan_patterns:
+      - ARCHITECTURE.md
+      - docs/architecture.md
+      - docs/ARCHITECTURE.md
+      - architecture/README.md
+    default_paths:
+      - src/**
+      - apps/**
+      - lib/**
+      - package.json
+      - pyproject.toml
+    default_cadence: on-architectural-change
+    tone: precise, concise, technical
+    generation_order: 3
+
+  - name: DECISIONS
+    canonical_filename: DECISIONS.md
+    category: Architecture & Design
+    description: Architecture Decision Records (why decisions were made)
+    scan_patterns:
+      - DECISIONS.md
+      - docs/decisions.md
+      - adr/
+      - docs/adr/
+      - decisions/
+    default_paths: []
+    default_cadence: on-new-decision
+    tone: structured, neutral
+    generation_order: 7
+
+  - name: DATA_MODEL
+    canonical_filename: DATA_MODEL.md
+    category: Architecture & Design
+    description: Entities, relationships, data flows, schema conventions
+    scan_patterns:
+      - DATA_MODEL.md
+      - docs/data-model.md
+      - docs/schema.md
+      - docs/data_model.md
+    default_paths:
+      - schema/**
+      - migrations/**
+      - models/**
+      - prisma/**
+    default_cadence: on-schema-change
+    tone: precise, technical
+    generation_order: 8
+
+  - name: DESIGN_SYSTEM
+    canonical_filename: DESIGN_SYSTEM.md
+    category: Frontend
+    description: Component philosophy, tokens, usage guidance
+    scan_patterns:
+      - DESIGN_SYSTEM.md
+      - docs/design-system.md
+      - docs/design_system.md
+    default_paths:
+      - src/components/**
+      - tokens/**
+      - packages/ui/**
+    default_cadence: on-design-change
+    tone: instructional, technical
+    generation_order: 9
+    applies_when: has_frontend
+
+  - name: STATE_MANAGEMENT
+    canonical_filename: STATE_MANAGEMENT.md
+    category: Frontend
+    description: Client vs server state, store structure, naming
+    scan_patterns:
+      - STATE_MANAGEMENT.md
+      - docs/state.md
+      - docs/state-management.md
+    default_paths:
+      - src/stores/**
+      - src/store/**
+    default_cadence: on-state-architecture-change
+    tone: precise, technical
+    generation_order: 10
+    applies_when: has_frontend
+
+  - name: MONOREPO
+    canonical_filename: MONOREPO.md
+    category: Frontend
+    description: Workspace layout, package ownership, dependency rules
+    scan_patterns:
+      - MONOREPO.md
+      - docs/monorepo.md
+      - WORKSPACE.md
+    default_paths:
+      - nx.json
+      - turbo.json
+      - pnpm-workspace.yaml
+      - lerna.json
+    default_cadence: on-monorepo-restructure
+    tone: precise, technical
+    generation_order: 11
+    applies_when: is_monorepo
+
+  - name: RUNBOOK
+    canonical_filename: RUNBOOK.md
+    category: Process & Operations
+    description: Deploy, rollback, incident response
+    scan_patterns:
+      - RUNBOOK.md
+      - docs/runbook.md
+      - OPERATIONS.md
+      - ops/runbook.md
+      - setup/deploy.md
+    default_paths:
+      - Dockerfile
+      - docker-compose*
+      - .github/workflows/deploy*
+      - deploy/**
+    default_cadence: on-ops-change
+    tone: precise, instructional
+    generation_order: 12
+
+  - name: ENVIRONMENT
+    canonical_filename: ENVIRONMENT.md
+    category: Process & Operations
+    description: Env var shape and where to get values
+    scan_patterns:
+      - ENVIRONMENT.md
+      - docs/environment.md
+      - docs/env.md
+    default_paths:
+      - .env.example
+      - .env.sample
+    default_cadence: on-env-change
+    tone: precise, technical
+    generation_order: 13
+
+  - name: CHANGELOG
+    canonical_filename: CHANGELOG.md
+    category: Process & Operations
+    description: Release history (conventional commit-friendly)
+    scan_patterns:
+      - CHANGELOG.md
+      - HISTORY.md
+      - RELEASES.md
+      - CHANGELOG.rst
+    default_paths: []
+    default_cadence: on-release
+    tone: structured, neutral
+    generation_order: 14
+
+  - name: GOTCHAS
+    canonical_filename: GOTCHAS.md
+    category: Process & Operations
+    description: Non-obvious behaviors, footguns, "why does this work this way?"
+    scan_patterns:
+      - GOTCHAS.md
+      - PITFALLS.md
+      - docs/gotchas.md
+      - KNOWN_ISSUES.md
+    default_paths: []
+    default_cadence: ongoing
+    tone: informal, candid, first-person — should NOT read like documentation
+    generation_order: 15
+
+# Files to skip during the "other docs" scan (these aren't user-facing docs)
+skip_files:
+  - DOCS_REGISTRY.md
+  - DOCS_AUDIT_LOG.md
+  - LICENSE.md
+  - LICENSE
+  - CODE_OF_CONDUCT.md
+
+# Directories to search for docs
+search_dirs:
+  - .
+  - docs
+  - .github
+  - .github/docs
+  - wiki
+  - documentation

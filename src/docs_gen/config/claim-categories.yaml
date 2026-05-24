@@ -1,0 +1,180 @@
+version: 1
+
+# Categories used by validate_docs.py to detect cross-doc contradictions.
+# Each category lists named alternatives with their detection patterns.
+#
+# exclusive: true  → only one value should appear across all docs (e.g., one
+#                    database choice). Conflicting dominants flagged as high-severity.
+# exclusive: false → multiple values are legitimate (e.g., React + Next.js,
+#                    or both server-state and client-state libraries).
+#
+# Patterns are regex strings, matched case-insensitively against each doc's text.
+#
+# Adding a new category: append an entry here. validate_docs.py picks it up
+# automatically — no code edit required.
+
+categories:
+
+  - name: database
+    exclusive: true
+    patterns:
+      - pattern: "\\bPostgres(?:QL|Sql)?\\b"
+        label: PostgreSQL
+      - pattern: "\\bMySQL\\b"
+        label: MySQL
+      - pattern: "\\bMongoDB\\b"
+        label: MongoDB
+      - pattern: "\\bSQLite\\b"
+        label: SQLite
+      - pattern: "\\bDynamoDB\\b"
+        label: DynamoDB
+      - pattern: "\\bCassandra\\b"
+        label: Cassandra
+      - pattern: "\\bRedis\\b"
+        label: Redis
+      - pattern: "\\bMariaDB\\b"
+        label: MariaDB
+
+  - name: auth_provider
+    exclusive: true
+    patterns:
+      - pattern: "\\bClerk\\b"
+        label: Clerk
+      - pattern: "\\bAuth0\\b"
+        label: Auth0
+      - pattern: "\\bNextAuth\\b"
+        label: NextAuth
+      - pattern: "\\bSupabase Auth\\b"
+        label: Supabase Auth
+      - pattern: "\\bFirebase Auth\\b"
+        label: Firebase Auth
+      - pattern: "\\bOkta\\b"
+        label: Okta
+      - pattern: "\\bCognito\\b"
+        label: AWS Cognito
+
+  - name: build_tool
+    exclusive: true
+    patterns:
+      - pattern: "\\bVite\\b"
+        label: Vite
+      - pattern: "\\bWebpack\\b"
+        label: Webpack
+      - pattern: "\\bTurbopack\\b"
+        label: Turbopack
+      - pattern: "\\bRollup\\b"
+        label: Rollup
+      - pattern: "\\besbuild\\b"
+        label: esbuild
+      - pattern: "\\bParcel\\b"
+        label: Parcel
+
+  - name: deploy_target
+    exclusive: false
+    patterns:
+      - pattern: "\\bVercel\\b"
+        label: Vercel
+      - pattern: "\\bNetlify\\b"
+        label: Netlify
+      - pattern: "\\bHeroku\\b"
+        label: Heroku
+      - pattern: "\\bRailway\\b"
+        label: Railway
+      - pattern: "\\bFly\\.io\\b"
+        label: Fly.io
+      - pattern: "\\bRender\\b"
+        label: Render
+      - pattern: "\\bAWS\\b(?!\\s+Cognito)"
+        label: AWS
+      - pattern: "\\bGCP\\b|\\bGoogle Cloud\\b"
+        label: GCP
+      - pattern: "\\bAzure\\b"
+        label: Azure
+
+  - name: monorepo_tool
+    exclusive: true
+    patterns:
+      - pattern: "\\bNX\\b|\\bNx\\b(?![a-z])"
+        label: NX
+      - pattern: "\\bTurborepo?\\b"
+        label: Turborepo
+      - pattern: "\\bLerna\\b"
+        label: Lerna
+      - pattern: "\\bRush\\b"
+        label: Rush
+
+  - name: package_manager
+    exclusive: true
+    patterns:
+      - pattern: "\\bpnpm\\b"
+        label: pnpm
+      - pattern: "\\byarn\\b"
+        label: yarn
+      - pattern: "\\bnpm\\b"
+        label: npm
+      - pattern: "\\bbun\\b"
+        label: bun
+
+  - name: frontend_framework
+    exclusive: false
+    patterns:
+      - pattern: "\\bReact\\b"
+        label: React
+      - pattern: "\\bVue\\b"
+        label: Vue
+      - pattern: "\\bSvelte\\b"
+        label: Svelte
+      - pattern: "\\bAngular\\b"
+        label: Angular
+      - pattern: "\\bSolid(?:JS)?\\b"
+        label: Solid
+      - pattern: "\\bNext\\.js\\b|\\bNextjs\\b"
+        label: Next.js
+      - pattern: "\\bNuxt\\b"
+        label: Nuxt
+      - pattern: "\\bRemix\\b"
+        label: Remix
+
+  - name: client_state
+    exclusive: true
+    patterns:
+      - pattern: "\\bZustand\\b"
+        label: Zustand
+      - pattern: "\\bRedux\\b"
+        label: Redux
+      - pattern: "\\bJotai\\b"
+        label: Jotai
+      - pattern: "\\bMobX\\b"
+        label: MobX
+      - pattern: "\\bRecoil\\b"
+        label: Recoil
+      - pattern: "\\bValtio\\b"
+        label: Valtio
+
+  - name: server_state
+    exclusive: true
+    patterns:
+      - pattern: "\\bTanStack Query\\b|\\bReact Query\\b"
+        label: TanStack Query
+      - pattern: "\\bSWR\\b"
+        label: SWR
+      - pattern: "\\bApollo\\b"
+        label: Apollo
+      - pattern: "\\burql\\b"
+        label: urql
+
+  - name: ci_cd
+    exclusive: true
+    patterns:
+      - pattern: "\\bGitHub Actions\\b"
+        label: GitHub Actions
+      - pattern: "\\bCircleCI\\b"
+        label: CircleCI
+      - pattern: "\\bGitLab CI\\b"
+        label: GitLab CI
+      - pattern: "\\bJenkins\\b"
+        label: Jenkins
+      - pattern: "\\bBuildkite\\b"
+        label: Buildkite
+      - pattern: "\\bTravis CI\\b"
+        label: Travis CI
