@@ -214,7 +214,12 @@ def main(argv: list[str] | None = None) -> int:
         log.info("Skipping sync (--skip-sync). Run `docs-gen sync` when you're ready.")
         return 0
 
-    sync_args = [str(plan_path), "--output-dir", str(repo)]
+    sync_args = [
+        str(plan_path),
+        "--output-dir", str(repo),
+        "--workflows-dir", str(repo / ".github" / "workflows"),
+        "--audit-log", str(repo / "DOCS_AUDIT_LOG.md"),
+    ]
     if args.dry_run:
         sync_args.append("--dry-run")
     return sync_cmd.main(sync_args)
