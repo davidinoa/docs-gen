@@ -304,6 +304,8 @@ def assess_spec(content: str) -> dict:
         "summary": {"good": good, "thin": thin, "missing": missing},
         "questions_to_ask": questions_to_ask,
         "section_headers_found": [s["header"] for s in sections if s["header"] != "(intro)"],
+        "assistant_instructions": instructions,
+        # Deprecated: removed in a future release. Use assistant_instructions instead.
         "claude_instructions": instructions,
     }
 

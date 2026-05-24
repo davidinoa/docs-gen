@@ -8,7 +8,7 @@ Runs three passes:
   2. Semantic claim extraction — for each category defined in claim-categories.yaml,
      detect which named choices appear in each doc, using a dominant-value heuristic
      to avoid false positives when alternatives are mentioned in passing.
-  3. Semantic summary — extracts key facts per doc for Claude's deeper review.
+  3. Semantic summary — extracts key facts per doc for an LLM's deeper review.
 
 Status messages → stderr. JSON report → stdout (or --output file).
 
@@ -246,7 +246,7 @@ def check_claim_conflicts(docs: dict[str, str], categories: dict) -> tuple[list[
 
 def build_semantic_summary(docs: dict[str, str]) -> dict[str, dict]:
     """
-    Extract key facts from each doc for Claude to review for deeper contradictions.
+    Extract key facts from each doc so an LLM can review for deeper contradictions.
     Returns a dict of filename → {headers, env_vars, version_mentions, word_count}.
     """
     summary = {}
@@ -312,6 +312,15 @@ def main(argv: list[str] | None = None) -> int:
     medium = [i for i in issues if i["severity"] == "medium"]
     low    = [i for i in issues if i["severity"] == "low"]
 
+    assistant_instructions = (
+        "Review the issues above, the extracted_claims per doc, and the "
+        "semantic_summary. Heuristics catch surface-level contradictions and "
+        "claim conflicts in mutually-exclusive categories (database, auth, etc.). "
+        "Look for deeper contradictions that named-entity matching can't catch — "
+        "e.g., two docs describing the same flow differently, or conflicting "
+        "claims phrased in non-standard ways. Flag any you find and resolve them "
+        "before finalizing."
+    )
     report = {
         "docs_checked": list(docs.keys()),
         "issue_count": len(issues),
@@ -319,15 +328,9 @@ def main(argv: list[str] | None = None) -> int:
         "issues": issues,
         "extracted_claims": per_doc_claims,
         "semantic_summary": build_semantic_summary(docs),
-        "claude_instructions": (
-            "Review the issues above, the extracted_claims per doc, and the "
-            "semantic_summary. Heuristics catch surface-level contradictions and "
-            "claim conflicts in mutually-exclusive categories (database, auth, etc.). "
-            "Look for deeper contradictions that named-entity matching can't catch — "
-            "e.g., two docs describing the same flow differently, or conflicting "
-            "claims phrased in non-standard ways. Flag any you find and resolve them "
-            "before finalizing."
-        ),
+        "assistant_instructions": assistant_instructions,
+        # Deprecated: removed in a future release. Use assistant_instructions instead.
+        "claude_instructions": assistant_instructions,
     }
 
     if args.output:

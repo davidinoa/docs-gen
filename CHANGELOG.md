@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-24
+
+### Changed
+- Rename JSON output key `claude_instructions` to `assistant_instructions` in
+  `assess` and `validate` reports. The old key is still emitted with the same
+  value for one release as a compatibility shim — switch consumers over and
+  expect `claude_instructions` to be removed in a future version.
+- Replace incidental "Claude" references in internal docstrings with the
+  generic "an LLM" / "the operator" — the tool itself is LLM-agnostic; only
+  the companion `repo-docs-generator` skill is Claude-specific (by design,
+  since it's an Anthropic skill).
+
 ## [0.2.0] - 2026-05-24
 
 ### Added

@@ -15,6 +15,18 @@ def test_validate_no_issues_on_clean_docs(tmp_repo, write_md):
     assert report["summary"]["high"] == 0
 
 
+def test_validate_emits_both_instructions_keys_for_compat(tmp_repo, write_md):
+    """`assistant_instructions` is canonical; `claude_instructions` is a deprecated alias."""
+    write_md("README.md", "# Project\n")
+    result = run_script("validate_docs.py",
+                        str(tmp_repo / "README.md"),
+                        "--output", str(tmp_repo / "report.json"))
+    report = json.loads((tmp_repo / "report.json").read_text())
+    assert "assistant_instructions" in report
+    assert "claude_instructions" in report
+    assert report["assistant_instructions"] == report["claude_instructions"]
+
+
 def test_validate_detects_version_conflict(tmp_repo, write_md):
     write_md("README.md", "Requires Node.js 18 for development.\n")
     write_md("ARCHITECTURE.md", "Built on Node.js 20 runtime.\n")

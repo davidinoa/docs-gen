@@ -2,10 +2,10 @@
 """
 state.py — Track progress through the docs generation workflow.
 
-Maintains .docs-meta/state.json in the target repo. Lets Claude (and humans)
-see where the workflow is, what's been done, and which artifacts exist.
-Enables idempotency: re-running the skill on the same repo picks up from
-the last completed step rather than starting over.
+Maintains .docs-meta/state.json in the target repo. Lets an LLM-driven
+skill (or a human) see where the workflow is, what's been done, and which
+artifacts exist. Enables idempotency: re-running on the same repo picks
+up from the last completed step rather than starting over.
 
 Usage:
     python state.py init <repo_path>

@@ -172,3 +172,14 @@ def test_assess_stdout_pure_json(tmp_repo):
     # Should parse as JSON even if there's stderr
     data = json.loads(result.stdout)
     assert "completeness_pct" in data
+
+
+def test_assess_emits_both_instructions_keys_for_compat(tmp_repo):
+    """`assistant_instructions` is canonical; `claude_instructions` is a deprecated alias."""
+    spec = tmp_repo / "s.md"
+    spec.write_text("# X\n\nGoals: do thing.\n")
+    result = run_script("assess_specs.py", str(spec))
+    data = json.loads(result.stdout)
+    assert "assistant_instructions" in data
+    assert "claude_instructions" in data
+    assert data["assistant_instructions"] == data["claude_instructions"]

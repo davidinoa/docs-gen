@@ -2,8 +2,10 @@
 """
 validate_plan.py — Verify that doc-plan.json is well-formed before downstream scripts use it.
 
-Catches Claude's structural mistakes (missing fields, invalid dispositions, inconsistent
-generate flags) early so build_registry.py and friends don't fail with cryptic errors.
+Catches structural mistakes (missing fields, invalid dispositions, inconsistent
+generate flags) early — wherever the plan came from (an LLM, a script, or a
+human editing the JSON by hand) — so build_registry.py and friends don't fail
+with cryptic errors.
 
 Usage:
     python validate_plan.py <doc-plan.json>

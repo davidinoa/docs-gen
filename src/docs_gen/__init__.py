@@ -6,7 +6,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Iterable
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # Schema versions supported by this release. When we change a config or
 # registry format incompatibly, bump the file's `version:` field AND add
