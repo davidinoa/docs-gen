@@ -27,6 +27,7 @@ COMMANDS: dict[str, str] = {
     "doctor":          "doctor",
     "state":           "state",
     "template":        "template",
+    "codeowners":      "codeowners",
 }
 
 

@@ -31,8 +31,82 @@ def load_doc_plan(path: str) -> dict:
         return json.load(f)
 
 
-def build_registry_yaml(doc_plan: dict) -> dict:
-    """Build the registry data structure from doc-plan.json."""
+def _extract_summary(content: str, max_chars: int = 240) -> str:
+    """Pull a one-paragraph summary from a markdown doc.
+
+    Strategy: skip leading blank lines and the first H1 heading. Take the
+    first non-empty paragraph, collapse whitespace, truncate to max_chars
+    at a word boundary. Returns "" if no usable content found.
+    """
+    if not content:
+        return ""
+    lines = content.splitlines()
+    i = 0
+    # Skip leading blanks
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    # Skip a single H1 heading line, if present.
+    if i < len(lines) and lines[i].lstrip().startswith("# "):
+        i += 1
+    # Skip blanks between H1 and the first paragraph.
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    # Collect the next non-blank block, skipping any subheadings.
+    para_lines: list[str] = []
+    while i < len(lines):
+        line = lines[i].rstrip()
+        if not line.strip():
+            if para_lines:
+                break
+            i += 1
+            continue
+        if line.lstrip().startswith(("#", "```", "|", "<!--", ">", "- ", "* ")):
+            i += 1
+            if para_lines:
+                break
+            continue
+        para_lines.append(line.strip())
+        i += 1
+    text = " ".join(para_lines).strip()
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    truncated = text[:max_chars].rsplit(" ", 1)[0]
+    return truncated + "…"
+
+
+def _resolve_summary(entry: dict, repo_root: Path | None) -> str:
+    """Pick the best summary for a doc-plan entry.
+
+    Priority: explicit `summary` in the plan → auto-extract from the doc
+    file if it already exists on disk → empty string.
+    """
+    declared = entry.get("summary")
+    if declared:
+        return str(declared).strip()
+    if repo_root is None:
+        return ""
+    candidates = []
+    if entry.get("existing_path"):
+        candidates.append(repo_root / entry["existing_path"])
+    candidates.append(repo_root / entry["filename"])
+    for path in candidates:
+        if path.is_file():
+            try:
+                return _extract_summary(path.read_text(encoding="utf-8", errors="ignore"))
+            except OSError:
+                continue
+    return ""
+
+
+def build_registry_yaml(doc_plan: dict, repo_root: Path | None = None) -> dict:
+    """Build the registry data structure from doc-plan.json.
+
+    `repo_root` is used to auto-extract `summary` fields from existing
+    doc files. When None, summaries are taken only from explicit `summary`
+    fields in the plan.
+    """
     # Normalize disposition (verb) → origin (state/noun) for the registry
     origin_map = {
         "generate": "generated",
@@ -62,6 +136,8 @@ def build_registry_yaml(doc_plan: dict) -> dict:
             "origin": origin_map.get(disposition, disposition),
             "cadence": entry.get("cadence", "on-change"),
             "custom": entry.get("custom", False),
+            "owners": entry.get("owners", []),
+            "summary": _resolve_summary(entry, repo_root),
             "last_reviewed": str(date.today()),
             "reviewer": "",
         }
@@ -88,6 +164,8 @@ def render_yaml(data: dict) -> str:
         lines.append(f"    custom: {'true' if doc['custom'] else 'false'}")
         lines.append(f"    last_reviewed: \"{doc['last_reviewed']}\"")
         lines.append(f"    reviewer: \"{doc['reviewer']}\"")
+        if doc.get("summary"):
+            lines.append(f"    summary: \"{doc['summary'].replace(chr(34), chr(92) + chr(34))}\"")
         if doc["owns"]:
             lines.append("    owns:")
             for item in doc["owns"]:
@@ -100,6 +178,13 @@ def render_yaml(data: dict) -> str:
                 lines.append(f"      - \"{p}\"")
         else:
             lines.append("    paths: []")
+        owners = doc.get("owners") or []
+        if owners:
+            lines.append("    owners:")
+            for o in owners:
+                lines.append(f"      - \"{o}\"")
+        else:
+            lines.append("    owners: []")
     return "\n".join(lines) + "\n"
 
 
@@ -251,6 +336,35 @@ def render_markdown(registry: dict) -> str:
     out.append("|---------|---------------------|-------------------|")
     out.append(xref_body)
     out.append("")
+    out.append("## Doc Summaries")
+    out.append("")
+    out.append("Short descriptions to help humans and agents pick the right doc to read.")
+    out.append("Summaries are auto-extracted from each doc's first paragraph (or set in the plan).")
+    out.append("")
+    any_summary = False
+    for d in docs:
+        summary = (d.get("summary") or "").strip()
+        if not summary:
+            continue
+        any_summary = True
+        out.append(f"- **`{d['file']}`** — {summary}")
+    if not any_summary:
+        out.append("- *(No summaries yet — write the first paragraph of each doc and re-run `build-registry`.)*")
+    out.append("")
+
+    owners_rows = [d for d in docs if d.get("owners")]
+    if owners_rows:
+        out.append("## Doc Owners")
+        out.append("")
+        out.append("Reviewers responsible for each doc. Exported to `.github/CODEOWNERS` via `docs-gen codeowners`.")
+        out.append("")
+        out.append("| Doc | Owners |")
+        out.append("|-----|--------|")
+        for d in owners_rows:
+            owners_cell = ", ".join(d["owners"])
+            out.append(f"| `{d['file']}` | {owners_cell} |")
+        out.append("")
+
     out.append("## Review Cadences")
     out.append("")
     out.append("| Cadence | Docs |")
@@ -289,7 +403,8 @@ def main(argv: list[str] | None = None) -> int:
         log.error(f"doc-plan is not valid JSON ({doc_plan_path}): {exc}")
         return 1
 
-    registry = build_registry_yaml(doc_plan)
+    # When summarizing, look for docs next to the output dir (the registry's home).
+    registry = build_registry_yaml(doc_plan, repo_root=output_dir.resolve())
     yaml_path = output_dir / "docs-registry.yaml"
     md_path = output_dir / "DOCS_REGISTRY.md"
 

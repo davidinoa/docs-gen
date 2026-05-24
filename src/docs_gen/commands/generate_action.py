@@ -55,7 +55,7 @@ def paths_to_pattern(paths: list[str]) -> str:
     return "|".join(glob_to_grep_pattern(p) for p in paths)
 
 
-def generate_action_yaml(registry: dict) -> str:
+def generate_action_yaml(registry: dict, *, strict: bool = False) -> str:
     project = registry.get("project", "this project")
     docs = registry.get("docs", [])
 
@@ -85,11 +85,27 @@ def generate_action_yaml(registry: dict) -> str:
 
     check_block = "\n".join(all_check_lines) if all_check_lines else "          # No path mappings declared in registry"
 
-    # Build YAML directly — no textwrap.dedent. Indentation is intentional and literal.
+    # Build mode-dependent fragments before the f-string so they can be
+    # interpolated alongside the static blocks.
+    mode_banner = "STRICT (fails the PR when docs aren't updated)" if strict else "soft (comments only)"
+    if strict:
+        strict_note = "> ⛔ **Strict mode**: this check fails until the docs listed above are updated in this PR."
+        strict_fail_step = (
+            "      - name: Fail when docs aren't updated\n"
+            "        if: steps.map.outputs.flagged != ''\n"
+            "        run: |\n"
+            "          echo \"::error::Affected docs were not updated. Update them or remove the path mapping from docs-registry.yaml.\"\n"
+            "          exit 1\n\n"
+        )
+    else:
+        strict_note = "> This check never blocks merging — it's a prompt, not a gate."
+        strict_fail_step = ""
+
     yaml_text = f"""# docs-check.yml
 # ⚠️ Generated from docs-registry.yaml — do not edit directly.
 # To update path mappings, edit docs-registry.yaml and re-run generate_action.py.
 #
+# Mode: {mode_banner}
 # Project: {project}
 
 name: Docs Check
@@ -155,7 +171,7 @@ jobs:
               "",
               flagged,
               "",
-              "> This check never blocks merging — it's a prompt, not a gate.",
+              "{strict_note}",
               "> Log your review in [DOCS_AUDIT_LOG.md](../../DOCS_AUDIT_LOG.md)."
             ].join("\\n");
 
@@ -166,7 +182,7 @@ jobs:
               body
             }});
 
-      - name: No docs flagged
+{strict_fail_step}      - name: No docs flagged
         if: steps.map.outputs.flagged == ''
         run: echo "✅ No docs flagged for this PR."
 """
@@ -184,6 +200,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="If set, append an entry to this audit log after regeneration")
     parser.add_argument("--reviewer", default="[automated]",
                         help="Reviewer name to record in the audit entry (default: [automated])")
+    parser.add_argument("--strict", action="store_true",
+                        help="Emit a workflow that fails the PR when affected docs aren't updated (default: comment only)")
     args = parser.parse_args(argv)
 
     registry_path = args.registry_yaml
@@ -204,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         log.error(str(exc))
         return 1
 
-    action_yaml = generate_action_yaml(registry)
+    action_yaml = generate_action_yaml(registry, strict=args.strict)
     out_path = output_dir / "docs-check.yml"
 
     if args.dry_run:
