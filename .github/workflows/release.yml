@@ -39,13 +39,23 @@ jobs:
           pytest tests/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
-          body: |
-            Install:
-            ```
-            pip install https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/docs_gen-${{ github.ref_name }}.whl
-            ```
-            Wait — the wheel filename uses the version without the leading `v`. The correct install URL will appear in the assets list below.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAG_VERSION: ${{ github.ref_name }}
+        run: |
+          # Strip leading "v" so the install URL matches the wheel filename.
+          VERSION="${TAG_VERSION#v}"
+          {
+            echo "## Install"
+            echo
+            echo '```'
+            echo "pip install https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_VERSION}/docs_gen-${VERSION}-py3-none-any.whl"
+            echo '```'
+            echo
+            echo "Requires Python 3.10+."
+          } > /tmp/release_body.md
+          gh release create "${TAG_VERSION}" dist/* \
+            --title "${TAG_VERSION}" \
+            --notes-file /tmp/release_body.md \
+            --generate-notes
