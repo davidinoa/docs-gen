@@ -1,7 +1,9 @@
 """docs-gen — unified CLI entry point.
 
 Dispatches to command modules in docs_gen.commands. Each subcommand parses
-its own arguments and returns an exit code.
+its own arguments and returns an exit code. Global flags (--verbose,
+--quiet, --log-format) are stripped from argv before dispatch and used
+to configure docs_gen.log.
 
 Installed as the `docs-gen` console script via pyproject.toml.
 """
@@ -12,7 +14,8 @@ import importlib
 import sys
 from typing import Callable
 
-# Map subcommand → module name (under docs_gen.commands)
+from docs_gen import log
+
 COMMANDS: dict[str, str] = {
     "scan":            "scan",
     "assess":          "assess",
@@ -23,11 +26,11 @@ COMMANDS: dict[str, str] = {
     "audit":           "audit",
     "doctor":          "doctor",
     "state":           "state",
+    "template":        "template",
 }
 
 
 def _load_command(name: str) -> Callable[[list[str] | None], int]:
-    """Lazy-import a command module's main() function."""
     module = importlib.import_module(f"docs_gen.commands.{name}")
     return module.main
 
@@ -38,7 +41,13 @@ def _print_help() -> None:
     print()
     print("Generate, validate, and maintain a developer documentation ecosystem.")
     print()
-    print("Usage: docs-gen <subcommand> [args...]")
+    print("Usage: docs-gen [--verbose | --quiet] [--log-format text|json] <subcommand> [args...]")
+    print()
+    print("Global flags:")
+    print("  --verbose          More detailed status output")
+    print("  --quiet            Suppress status output (errors still printed)")
+    print("  --log-format FMT   text (default) or json — structured status events")
+    print("  --version          Print version and exit")
     print()
     print("Subcommands:")
     for cmd in COMMANDS:
@@ -47,9 +56,57 @@ def _print_help() -> None:
     print("Run `docs-gen <subcommand> --help` for subcommand-specific help.")
 
 
+def _extract_global_flags(argv: list[str]) -> tuple[dict, list[str]]:
+    """Strip global flags from argv and return (config, remaining).
+
+    Subcommand args remain untouched. Anything after a subcommand name is
+    passed through verbatim — including their own --verbose/--quiet which
+    are not supported per-subcommand.
+    """
+    config = {"verbose": False, "quiet": False, "log_format": "text"}
+    remaining: list[str] = []
+    i = 0
+    subcommand_seen = False
+    while i < len(argv):
+        token = argv[i]
+        if not subcommand_seen:
+            if token in ("--verbose", "-v"):
+                config["verbose"] = True
+                i += 1
+                continue
+            if token in ("--quiet", "-q"):
+                config["quiet"] = True
+                i += 1
+                continue
+            if token == "--log-format":
+                if i + 1 < len(argv):
+                    config["log_format"] = argv[i + 1]
+                    i += 2
+                    continue
+                i += 1
+                continue
+            if token.startswith("--log-format="):
+                config["log_format"] = token.split("=", 1)[1]
+                i += 1
+                continue
+            # First positional token (not a global flag) → subcommand.
+            if not token.startswith("-"):
+                subcommand_seen = True
+        remaining.append(token)
+        i += 1
+    return config, remaining
+
+
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
+
+    config, argv = _extract_global_flags(argv)
+    log.configure(
+        verbose=config["verbose"],
+        quiet=config["quiet"],
+        log_format=config["log_format"],
+    )
 
     if not argv or argv[0] in ("-h", "--help", "help"):
         _print_help()
@@ -62,12 +119,11 @@ def main(argv: list[str] | None = None) -> int:
 
     subcommand = argv[0]
     if subcommand not in COMMANDS:
-        print(f"❌ Unknown subcommand: {subcommand}", file=sys.stderr)
-        print("   Run `docs-gen --help` for the list of subcommands.", file=sys.stderr)
+        log.error(f"Unknown subcommand: {subcommand}")
+        log.error("Run `docs-gen --help` for the list of subcommands.")
         return 1
 
-    module_name = COMMANDS[subcommand]
-    cmd_main = _load_command(module_name)
+    cmd_main = _load_command(COMMANDS[subcommand])
     return cmd_main(argv[1:])
 
 

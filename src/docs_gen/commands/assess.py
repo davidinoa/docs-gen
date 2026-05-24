@@ -20,6 +20,8 @@ import re
 import sys
 from pathlib import Path
 
+from docs_gen import log
+
 
 # ── Dimension definitions ────────────────────────────────────────────────────
 
@@ -314,21 +316,25 @@ def main(argv: list[str] | None = None) -> int:
 
     spec_path = Path(args.spec_file)
     if not spec_path.exists():
-        print(f"❌ File not found: {args.spec_file}", file=sys.stderr)
+        log.error(f"File not found: {args.spec_file}")
         return 1
 
-    content = spec_path.read_text(encoding="utf-8", errors="ignore")
+    try:
+        content = spec_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        log.error(f"Could not read {spec_path}: {exc}")
+        return 1
     if not content.strip():
-        print("❌ File is empty.", file=sys.stderr)
+        log.error("File is empty.")
         return 1
 
-    print(f"🔍 Assessing: {spec_path} ({len(content.split())} words)", file=sys.stderr)
+    log.info(f"Assessing: {spec_path} ({len(content.split())} words)")
 
     report = {"source_file": str(spec_path), **assess_spec(content)}
 
     if args.output:
         Path(args.output).write_text(json.dumps(report, indent=2))
-        print(f"✅ Report written to {args.output}", file=sys.stderr)
+        log.ok(f"Report written to {args.output}")
     else:
         print(json.dumps(report, indent=2))
 

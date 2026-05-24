@@ -20,6 +20,8 @@ except ImportError:
     print("❌ pyyaml required. Install with: pip install pyyaml --break-system-packages", file=sys.stderr)
     sys.exit(1)
 
+from docs_gen import SUPPORTED_REGISTRY_VERSIONS, VersionMismatch, check_version, log
+
 
 def load_yaml(path):
     with open(path) as f:
@@ -176,23 +178,61 @@ def main(argv: list[str] | None = None) -> int:
                                      description="Generate .github/workflows/docs-check.yml from docs-registry.yaml")
     parser.add_argument("registry_yaml", help="Path to docs-registry.yaml")
     parser.add_argument("output_dir", help="Directory for the workflow file")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print would-write paths without modifying the filesystem")
+    parser.add_argument("--audit-log", default=None,
+                        help="If set, append an entry to this audit log after regeneration")
+    parser.add_argument("--reviewer", default="[automated]",
+                        help="Reviewer name to record in the audit entry (default: [automated])")
     args = parser.parse_args(argv)
 
     registry_path = args.registry_yaml
     output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    registry = load_yaml(registry_path)
+    try:
+        registry = load_yaml(registry_path)
+    except FileNotFoundError:
+        log.error(f"Registry not found: {registry_path}")
+        return 1
+    except yaml.YAMLError as exc:
+        log.error(f"Could not parse {registry_path}: {exc}")
+        return 1
+
+    try:
+        check_version(registry.get("version"), SUPPORTED_REGISTRY_VERSIONS, what=registry_path)
+    except VersionMismatch as exc:
+        log.error(str(exc))
+        return 1
+
     action_yaml = generate_action_yaml(registry)
-
     out_path = output_dir / "docs-check.yml"
+
+    if args.dry_run:
+        log.info(f"[dry-run] would create directory: {output_dir}")
+        log.info(f"[dry-run] would write: {out_path}")
+        if args.audit_log:
+            log.info(f"[dry-run] would append audit entry to: {args.audit_log}")
+        return 0
+
+    output_dir.mkdir(parents=True, exist_ok=True)
     out_path.write_text(action_yaml)
-    print(f"✅ Written: {out_path}", file=sys.stderr)
+    log.ok(f"Written: {out_path}")
 
     with_paths = sum(1 for d in registry.get("docs", []) if d.get("paths"))
     without_paths = sum(1 for d in registry.get("docs", []) if not d.get("paths"))
-    print(f"   Docs with path mappings: {with_paths}", file=sys.stderr)
-    print(f"   Docs without mappings (no code paths declared): {without_paths}", file=sys.stderr)
+    log.info(f"Docs with path mappings: {with_paths}")
+    log.info(f"Docs without mappings (no code paths declared): {without_paths}")
+
+    if args.audit_log:
+        from docs_gen.commands.audit import append_entry
+        append_entry(
+            Path(args.audit_log),
+            docs=".github/workflows/docs-check.yml",
+            change="Regenerated docs-check.yml from docs-registry.yaml",
+            trigger="generate-action CLI",
+            reviewer=args.reviewer,
+        )
+    return 0
 
 
 if __name__ == "__main__":

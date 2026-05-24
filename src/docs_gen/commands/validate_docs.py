@@ -29,7 +29,13 @@ except ImportError:
     print("❌ pyyaml required. Install: pip install pyyaml --break-system-packages", file=sys.stderr)
     sys.exit(1)
 
-from docs_gen import config_path
+from docs_gen import (
+    SUPPORTED_CONFIG_VERSIONS,
+    VersionMismatch,
+    check_version,
+    config_path,
+    log,
+)
 
 
 def load_claim_categories(path: Path | None = None) -> dict:
@@ -38,6 +44,7 @@ def load_claim_categories(path: Path | None = None) -> dict:
         path = config_path("claim-categories.yaml")
     with open(path) as f:
         config = yaml.safe_load(f)
+    check_version(config.get("version"), SUPPORTED_CONFIG_VERSIONS, what=str(path))
     result = {}
     for cat in config["categories"]:
         result[cat["name"]] = {
@@ -260,23 +267,39 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate docs for contradictions and drift")
     parser.add_argument("docs", nargs="+", help="Markdown files to validate")
     parser.add_argument("--output", default=None, help="Write JSON report to this path")
+    parser.add_argument("--claim-categories", default=None,
+                        help="Override path to claim-categories.yaml (default: packaged config)")
     args = parser.parse_args(argv)
 
     docs: dict[str, str] = {}
     for path_str in args.docs:
         path = Path(path_str)
         if not path.exists():
-            print(f"⚠️  Skipping {path_str} — file not found")
+            log.warn(f"Skipping {path_str} — file not found")
             continue
-        docs[path.name] = path.read_text(encoding="utf-8", errors="ignore")
+        try:
+            docs[path.name] = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError as exc:
+            log.warn(f"Skipping {path_str} — could not read: {exc}")
 
     if not docs:
-        print("❌ No readable docs found.", file=sys.stderr)
+        log.error("No readable docs found.")
         return 1
 
-    print(f"🔍 Validating {len(docs)} docs: {', '.join(docs.keys())}", file=sys.stderr)
+    log.info(f"Validating {len(docs)} docs: {', '.join(docs.keys())}")
 
-    categories = load_claim_categories()
+    try:
+        cat_path = Path(args.claim_categories) if args.claim_categories else None
+        categories = load_claim_categories(cat_path)
+    except FileNotFoundError as exc:
+        log.error(f"Could not find claim categories file: {exc}")
+        return 1
+    except yaml.YAMLError as exc:
+        log.error(f"Could not parse claim categories file: {exc}")
+        return 1
+    except VersionMismatch as exc:
+        log.error(str(exc))
+        return 1
 
     issues = []
     issues.extend(check_duplicate_headers(docs))
@@ -309,18 +332,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.output:
         Path(args.output).write_text(json.dumps(report, indent=2))
-        print(f"✅ Report written to {args.output}", file=sys.stderr)
+        log.ok(f"Report written to {args.output}")
     else:
         print(json.dumps(report, indent=2))
 
     if high:
-        print(f"\n🔴 {len(high)} high-severity issue(s) found — resolve before finalizing.", file=sys.stderr)
+        log.error(f"{len(high)} high-severity issue(s) found — resolve before finalizing.")
         return 2
     elif medium:
-        print(f"\n🟡 {len(medium)} medium-severity issue(s) found — review recommended.", file=sys.stderr)
+        log.warn(f"{len(medium)} medium-severity issue(s) found — review recommended.")
         return 1
     else:
-        print(f"\n✅ No high/medium issues found. {len(low)} low-severity note(s).", file=sys.stderr)
+        log.ok(f"No high/medium issues found. {len(low)} low-severity note(s).")
         return 0
 
 

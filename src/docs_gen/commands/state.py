@@ -21,6 +21,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from docs_gen import log
+
 # Canonical pipeline step order. The skill follows this order.
 PIPELINE_STEPS = [
     "specs",       # SPECS.md created/adopted
@@ -70,9 +72,13 @@ def init_state(repo: Path) -> dict:
 def load_state(repo: Path) -> dict:
     sp = state_path(repo)
     if not sp.exists():
-        print(f"❌ No state file at {sp}. Run `state.py init` first.", file=sys.stderr)
+        log.error(f"No state file at {sp}. Run `docs-gen state init <repo>` first.")
         sys.exit(1)
-    return json.loads(sp.read_text())
+    try:
+        return json.loads(sp.read_text())
+    except json.JSONDecodeError as exc:
+        log.error(f"State file {sp} is not valid JSON: {exc}")
+        sys.exit(1)
 
 
 def save_state(repo: Path, state: dict) -> None:
@@ -82,7 +88,7 @@ def save_state(repo: Path, state: dict) -> None:
 
 def advance(repo: Path, step: str, artifacts: dict, outputs: list[str], force: bool = False) -> dict:
     if step not in PIPELINE_STEPS:
-        print(f"❌ Unknown step: {step}. Valid: {', '.join(PIPELINE_STEPS)}", file=sys.stderr)
+        log.error(f"Unknown step: {step}. Valid: {', '.join(PIPELINE_STEPS)}")
         sys.exit(1)
 
     state = load_state(repo)
@@ -95,14 +101,14 @@ def advance(repo: Path, step: str, artifacts: dict, outputs: list[str], force: b
         if step_idx > current_idx:
             skipped = PIPELINE_STEPS[current_idx:step_idx]
             if not force:
-                print(f"⚠️  Skipping ahead from '{current}' to '{step}'. Missed: {', '.join(skipped)}", file=sys.stderr)
-                print(f"   Re-run with --force if intentional, or run the missed steps first.", file=sys.stderr)
+                log.warn(f"Skipping ahead from '{current}' to '{step}'. Missed: {', '.join(skipped)}")
+                log.warn("Re-run with --force if intentional, or run the missed steps first.")
                 sys.exit(2)
             else:
-                print(f"⚠️  Skipping ahead (forced). Missed steps: {', '.join(skipped)}", file=sys.stderr)
+                log.warn(f"Skipping ahead (forced). Missed steps: {', '.join(skipped)}")
 
     if step in state["completed_steps"]:
-        print(f"ℹ️  Step '{step}' was already complete. Updating artifacts only.", file=sys.stderr)
+        log.info(f"Step '{step}' was already complete. Updating artifacts only.")
     else:
         state["completed_steps"].append(step)
 
@@ -158,11 +164,30 @@ def parse_artifact_args(args: list[str]) -> dict:
     result = {}
     for a in args:
         if "=" not in a:
-            print(f"⚠️  Skipping malformed artifact arg: {a} (expected key=path)", file=sys.stderr)
+            log.warn(f"Skipping malformed artifact arg: {a} (expected key=path)")
             continue
         k, v = a.split("=", 1)
         result[k.strip()] = v.strip()
     return result
+
+
+def revert(repo: Path, step: str) -> dict:
+    """Rewind the state pointer to the given step.
+
+    Removes `step` and all later steps from completed_steps and sets
+    current_step to `step`. Artifacts and outputs are preserved on disk —
+    callers can re-run the workflow from that point.
+    """
+    if step not in PIPELINE_STEPS:
+        log.error(f"Unknown step: {step}. Valid: {', '.join(PIPELINE_STEPS)}")
+        sys.exit(1)
+    state = load_state(repo)
+    step_idx = PIPELINE_STEPS.index(step)
+    state["completed_steps"] = [s for s in state["completed_steps"]
+                                if PIPELINE_STEPS.index(s) < step_idx]
+    state["current_step"] = step
+    save_state(repo, state)
+    return state
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -191,18 +216,29 @@ def main(argv: list[str] | None = None) -> int:
     p_reset.add_argument("--repo", default=".")
     p_reset.add_argument("--yes", action="store_true", help="Skip confirmation")
 
+    p_revert = sub.add_parser("revert", help="Rewind to an earlier step (keeps artifacts on disk)")
+    p_revert.add_argument("--repo", default=".")
+    p_revert.add_argument("--step", required=True, choices=PIPELINE_STEPS)
+
+    p_init = sub.choices["init"]
+    p_init.add_argument("--dry-run", action="store_true",
+                        help="Print intended state path without modifying the filesystem")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "init":
         repo = Path(args.repo_path)
         if state_path(repo).exists():
-            print(f"⚠️  State already exists at {state_path(repo)}", file=sys.stderr)
-            print(f"   Use `state.py reset` to start over, or `state.py status` to see current state.", file=sys.stderr)
+            log.warn(f"State already exists at {state_path(repo)}")
+            log.warn("Use `docs-gen state reset` to start over, or `docs-gen state status` to see current state.")
             return 1
+        if getattr(args, "dry_run", False):
+            log.info(f"[dry-run] would initialize state at: {state_path(repo)}")
+            return 0
         state = init_state(repo)
-        print(f"✅ Initialized state at {state_path(repo)}", file=sys.stderr)
+        log.ok(f"Initialized state at {state_path(repo)}")
         print(json.dumps(state, indent=2))
-        return
+        return 0
 
     if args.cmd == "status":
         repo = Path(args.repo)
@@ -211,40 +247,49 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(state, indent=2))
         else:
             print_status(state)
-        return
+        return 0
 
     if args.cmd == "advance":
         repo = Path(args.repo)
         artifacts = parse_artifact_args(args.artifact)
         state = advance(repo, args.step, artifacts, args.output, force=args.force)
-        print(f"✅ Advanced to step '{state['current_step']}' (completed: {args.step})", file=sys.stderr)
-        return
+        log.ok(f"Advanced to step '{state['current_step']}' (completed: {args.step})")
+        return 0
 
     if args.cmd == "get":
         repo = Path(args.repo)
         state = load_state(repo)
         if args.field not in state:
-            print(f"❌ No field '{args.field}'. Available: {', '.join(state.keys())}", file=sys.stderr)
+            log.error(f"No field '{args.field}'. Available: {', '.join(state.keys())}")
             return 1
         val = state[args.field]
         if isinstance(val, (dict, list)):
             print(json.dumps(val, indent=2))
         else:
             print(val)
-        return
+        return 0
 
     if args.cmd == "reset":
         repo = Path(args.repo)
         sp = state_path(repo)
         if not sp.exists():
-            print(f"ℹ️  No state to reset at {sp}", file=sys.stderr)
-            return
+            log.info(f"No state to reset at {sp}")
+            return 0
         if not args.yes:
-            print(f"⚠️  This will delete {sp}. Re-run with --yes to confirm.", file=sys.stderr)
+            log.warn(f"This will delete {sp}. Re-run with --yes to confirm.")
             return 1
         sp.unlink()
-        print(f"✅ Deleted {sp}", file=sys.stderr)
-        return
+        log.ok(f"Deleted {sp}")
+        return 0
+
+    if args.cmd == "revert":
+        repo = Path(args.repo)
+        state = revert(repo, args.step)
+        log.ok(f"Reverted to step '{state['current_step']}'")
+        log.info(f"Completed steps now: {', '.join(state['completed_steps']) or '(none)'}")
+        return 0
+
+    return 0
 
 
 if __name__ == "__main__":

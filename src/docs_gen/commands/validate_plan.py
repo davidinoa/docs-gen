@@ -26,6 +26,8 @@ except ImportError:
     print("❌ pyyaml required. Install: pip install pyyaml --break-system-packages", file=sys.stderr)
     sys.exit(1)
 
+from docs_gen import SUPPORTED_CONFIG_VERSIONS, VersionMismatch, check_version, log
+
 
 VALID_DISPOSITIONS = {
     "adopt", "augment", "refactor", "reclassify",
@@ -51,6 +53,7 @@ def load_doc_types(yaml_path: Path) -> set[str]:
     """Return set of canonical filenames defined in doc-types.yaml."""
     with open(yaml_path) as f:
         config = yaml.safe_load(f)
+    check_version(config.get("version"), SUPPORTED_CONFIG_VERSIONS, what=str(yaml_path))
     return {dt["canonical_filename"] for dt in config["doc_types"]}
 
 
@@ -218,13 +221,16 @@ def main(argv: list[str] | None = None) -> int:
 
     plan_path = Path(args.plan_file)
     if not plan_path.exists():
-        print(f"❌ File not found: {plan_path}", file=sys.stderr)
+        log.error(f"File not found: {plan_path}")
         return 1
 
     try:
         plan = json.loads(plan_path.read_text())
     except json.JSONDecodeError as e:
-        print(f"❌ Invalid JSON: {e}", file=sys.stderr)
+        log.error(f"Invalid JSON in {plan_path}: {e}")
+        return 1
+    except OSError as e:
+        log.error(f"Could not read {plan_path}: {e}")
         return 1
 
     if args.doc_types:
@@ -234,25 +240,32 @@ def main(argv: list[str] | None = None) -> int:
         doc_types_path = config_path("doc-types.yaml")
 
     if not doc_types_path.exists():
-        print(f"❌ doc-types.yaml not found at {doc_types_path}", file=sys.stderr)
+        log.error(f"doc-types.yaml not found at {doc_types_path}")
         return 1
 
-    known_canonical_names = load_doc_types(doc_types_path)
-    print(f"🔍 Validating {plan_path} ({len(plan.get('docs', []))} docs)", file=sys.stderr)
+    try:
+        known_canonical_names = load_doc_types(doc_types_path)
+    except yaml.YAMLError as exc:
+        log.error(f"Failed to parse {doc_types_path}: {exc}")
+        return 1
+    except VersionMismatch as exc:
+        log.error(str(exc))
+        return 1
+    log.info(f"Validating {plan_path} ({len(plan.get('docs', []))} docs)")
 
     errors, warnings = validate_plan(plan, known_canonical_names)
 
     if errors:
-        print(f"\n🔴 {len(errors)} error(s):", file=sys.stderr)
+        log.warn(f"{len(errors)} error(s):")
         for e in errors:
-            print(f"  - [{e['where']}] {e['message']}", file=sys.stderr)
+            log.warn(f"  - [{e['where']}] {e['message']}")
     if warnings:
-        print(f"\n🟡 {len(warnings)} warning(s):", file=sys.stderr)
+        log.warn(f"{len(warnings)} warning(s):")
         for w in warnings:
-            print(f"  - [{w['where']}] {w['message']}", file=sys.stderr)
+            log.warn(f"  - [{w['where']}] {w['message']}")
 
     if not errors and not warnings:
-        print("\n✅ Plan is valid with no warnings.", file=sys.stderr)
+        log.ok("Plan is valid with no warnings.")
 
     if errors:
         return 1

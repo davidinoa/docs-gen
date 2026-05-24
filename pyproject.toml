@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docs-gen"
-version = "0.1.0"
+version = "0.2.0"
 description = "Generate, validate, and maintain a developer documentation ecosystem for any repository"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -44,7 +44,7 @@ Issues = "https://github.com/davidinoa/docs-gen/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-docs_gen = ["config/*.yaml", "templates/*.md"]
+docs_gen = ["config/*.yaml", "templates/*.md", "templates/workflows/*.yml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

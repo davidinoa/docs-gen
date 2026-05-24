@@ -1,0 +1,76 @@
+# Starter docs-health.yml — copy into .github/workflows/ in your repo.
+#
+# What it does: runs `docs-gen doctor --full` on every PR and on pushes to
+# main. Fails the check on critical issues (missing registry, broken parse).
+# Other issues are reported as a comment without blocking the merge.
+#
+# Print this file via:
+#     docs-gen template show workflows/docs-health.yml > .github/workflows/docs-health.yml
+
+name: Docs Health
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 14:00 UTC — surfaces stale docs even when nothing changes.
+    - cron: "0 14 * * 1"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  doctor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install docs-gen
+        run: |
+          # Pin the version your team uses so behavior is reproducible.
+          pip install https://github.com/davidinoa/docs-gen/releases/download/v0.2.0/docs_gen-0.2.0-py3-none-any.whl
+
+      - name: Run doctor
+        id: doctor
+        run: |
+          set +e
+          docs-gen --log-format=json doctor . --full --output /tmp/health.json
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Comment on PR (non-blocking issues)
+        if: github.event_name == 'pull_request' && steps.doctor.outputs.exit_code == '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('/tmp/health.json', 'utf8'));
+            const issues = report.checks
+              .filter(c => c.status === 'fail')
+              .map(c => `- **${c.name}** — ${c.detail}`)
+              .join('\n');
+            const body = [
+              '## 🩺 Docs Health',
+              '',
+              `${report.summary.issues} non-blocking issue(s) found. Review when you can:`,
+              '',
+              issues,
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail on critical issues
+        if: steps.doctor.outputs.exit_code == '2'
+        run: |
+          echo "::error::docs-gen doctor reported critical issues — the docs ecosystem can't be checked."
+          exit 1

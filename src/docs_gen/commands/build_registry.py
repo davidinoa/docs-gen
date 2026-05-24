@@ -23,6 +23,8 @@ try:
 except ImportError:
     HAS_YAML = False
 
+from docs_gen import log
+
 
 def load_doc_plan(path: str) -> dict:
     with open(path) as f:
@@ -101,21 +103,57 @@ def render_yaml(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _propose_authoritative(subject: str, kind: str, candidates: list[str], docs_index: dict[str, dict]) -> str | None:
+    """Pick the most likely authoritative doc for a given subject.
+
+    Heuristic:
+      - For code paths: the candidate whose `paths` contains a more specific
+        (longer) match for the subject wins; ties broken by the doc whose
+        `owns` topics share words with the path basename.
+      - For ownership topics: the candidate whose `owns` contains the exact
+        subject string (case-insensitive) wins; ties broken by file name
+        alphabetic order so the choice is stable.
+    Returns the proposed filename, or None if the heuristic can't decide.
+    """
+    if not candidates:
+        return None
+
+    if kind == "code_path":
+        best: tuple[int, str] | None = None
+        for c in candidates:
+            paths = docs_index.get(c, {}).get("paths", [])
+            specificity = max((len(p) for p in paths if p == subject), default=0)
+            if best is None or specificity > best[0]:
+                best = (specificity, c)
+        if best and best[0] > 0:
+            return best[1]
+        return sorted(candidates)[0]
+
+    # ownership_topic
+    subject_norm = subject.lower().strip()
+    exact = [c for c in candidates if subject_norm in
+             {t.lower().strip() for t in docs_index.get(c, {}).get("owns", [])}]
+    if exact:
+        return sorted(exact)[0]
+    return sorted(candidates)[0]
+
+
 def detect_overlaps(docs: list[dict]) -> list[dict]:
     """
     Find docs that share code paths or ownership topics — these are contradiction risks.
 
-    Returns a list of {topic_or_path, type, docs} entries for the cross-reference table.
+    Returns a list of {subject, type, docs, proposed_authoritative} entries for the
+    cross-reference table.
     """
     from collections import defaultdict
 
-    # Path overlaps: which docs claim the same path pattern
+    docs_index = {d["file"]: d for d in docs}
+
     path_to_docs = defaultdict(list)
     for d in docs:
         for p in d.get("paths", []):
             path_to_docs[p].append(d["file"])
 
-    # Ownership topic overlaps: which docs claim the same topic
     topic_to_docs = defaultdict(list)
     for d in docs:
         for t in d.get("owns", []):
@@ -128,6 +166,7 @@ def detect_overlaps(docs: list[dict]) -> list[dict]:
                 "subject": path,
                 "type": "code_path",
                 "docs": files,
+                "proposed_authoritative": _propose_authoritative(path, "code_path", files, docs_index),
             })
     for topic, files in sorted(topic_to_docs.items()):
         if len(files) > 1:
@@ -135,6 +174,7 @@ def detect_overlaps(docs: list[dict]) -> list[dict]:
                 "subject": topic,
                 "type": "ownership_topic",
                 "docs": files,
+                "proposed_authoritative": _propose_authoritative(topic, "ownership_topic", files, docs_index),
             })
     return overlaps
 
@@ -167,13 +207,18 @@ def render_markdown(registry: dict) -> str:
             type_label = "code path" if o["type"] == "code_path" else "topic"
             subject = f"`{o['subject']}`" if o["type"] == "code_path" else o["subject"]
             docs_list = ", ".join(f"`{d}`" for d in o["docs"])
+            proposed = o.get("proposed_authoritative")
+            if proposed:
+                authoritative_cell = f"`{proposed}` *(proposed — confirm or override)*"
+            else:
+                authoritative_cell = "*[designate authoritative doc]*"
             xref_rows.append(
-                f"| {subject} ({type_label}) | {docs_list} | *[designate authoritative doc]* |"
+                f"| {subject} ({type_label}) | {docs_list} | {authoritative_cell} |"
             )
         xref_body = "\n".join(xref_rows)
         xref_intro = (
-            "Auto-detected overlaps between docs. For each row, designate which doc is "
-            "the authoritative source — other docs should link to it rather than restate."
+            "Auto-detected overlaps between docs. For each row, confirm or override the "
+            "proposed authoritative source — other docs should link to it rather than restate."
         )
     else:
         xref_body = "| *(No overlaps detected. Add manually if you find any.)* | | |"
@@ -224,22 +269,54 @@ def main(argv: list[str] | None = None) -> int:
                                      description="Generate docs-registry.yaml and DOCS_REGISTRY.md from doc-plan.json")
     parser.add_argument("doc_plan", help="Path to doc-plan.json")
     parser.add_argument("output_dir", help="Directory to write registry files")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print would-write paths without modifying the filesystem")
+    parser.add_argument("--audit-log", default=None,
+                        help="If set, append an entry to this audit log after regeneration")
+    parser.add_argument("--reviewer", default="[automated]",
+                        help="Reviewer name to record in the audit entry (default: [automated])")
     args = parser.parse_args(argv)
 
     doc_plan_path = args.doc_plan
     output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    doc_plan = load_doc_plan(doc_plan_path)
+    try:
+        doc_plan = load_doc_plan(doc_plan_path)
+    except FileNotFoundError:
+        log.error(f"doc-plan not found: {doc_plan_path}")
+        return 1
+    except json.JSONDecodeError as exc:
+        log.error(f"doc-plan is not valid JSON ({doc_plan_path}): {exc}")
+        return 1
+
     registry = build_registry_yaml(doc_plan)
-
     yaml_path = output_dir / "docs-registry.yaml"
-    yaml_path.write_text(render_yaml(registry))
-    print(f"✅ Written: {yaml_path}")
-
     md_path = output_dir / "DOCS_REGISTRY.md"
+
+    if args.dry_run:
+        log.info(f"[dry-run] would create directory: {output_dir}")
+        log.info(f"[dry-run] would write: {yaml_path}")
+        log.info(f"[dry-run] would write: {md_path}")
+        if args.audit_log:
+            log.info(f"[dry-run] would append audit entry to: {args.audit_log}")
+        return 0
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    yaml_path.write_text(render_yaml(registry))
+    log.ok(f"Written: {yaml_path}")
     md_path.write_text(render_markdown(registry))
-    print(f"✅ Written: {md_path}")
+    log.ok(f"Written: {md_path}")
+
+    if args.audit_log:
+        from docs_gen.commands.audit import append_entry
+        append_entry(
+            Path(args.audit_log),
+            docs="docs-registry.yaml, DOCS_REGISTRY.md",
+            change="Regenerated registry from doc-plan.json",
+            trigger="build-registry CLI",
+            reviewer=args.reviewer,
+        )
+    return 0
 
 
 if __name__ == "__main__":

@@ -24,7 +24,9 @@ Exit codes:
 
 import argparse
 import json
+import subprocess
 import sys
+from datetime import date, datetime
 from pathlib import Path
 
 try:
@@ -33,14 +35,53 @@ except ImportError:
     print("❌ pyyaml required. Install: pip install pyyaml --break-system-packages", file=sys.stderr)
     sys.exit(1)
 
+from docs_gen import SUPPORTED_REGISTRY_VERSIONS, VersionMismatch, check_version, log
+
+
+# Cadences with a clear time-based threshold. Event-driven cadences
+# ("on-change", "on-release", "ongoing") aren't time-bound and never stale.
+STALE_THRESHOLDS_DAYS = {
+    "weekly":     7,
+    "monthly":   30,
+    "quarterly": 90,
+    "yearly":   365,
+}
+
+
+_HARDCODED_IGNORES = {"node_modules", ".git", "dist", "build", ".next", "venv", ".venv"}
+
+
+def _git_tracked_md(repo: Path) -> set[str] | None:
+    """If repo is a git checkout, return the set of tracked .md paths.
+
+    Returns None when git isn't available or this isn't a git repo, so the
+    caller can fall back to the hardcoded ignore list.
+    """
+    if not (repo / ".git").exists():
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "--cached", "--others", "--exclude-standard", "*.md"],
+            capture_output=True, text=True, check=True, timeout=30,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
+    return {line for line in out.stdout.splitlines() if line.endswith(".md")}
+
 
 def find_md_files(repo: Path) -> set[str]:
-    """Find all markdown files in the repo (excluding common ignores)."""
-    ignore_dirs = {"node_modules", ".git", "dist", "build", ".next", "venv", ".venv"}
+    """Find all markdown files in the repo.
+
+    Honors .gitignore when run inside a git checkout. Falls back to a small
+    hardcoded ignore list (node_modules, .git, dist, build, .next, venv,
+    .venv) when git isn't available.
+    """
+    tracked = _git_tracked_md(repo)
+    if tracked is not None:
+        return tracked
     found = set()
     for path in repo.rglob("*.md"):
-        # Skip if any path part is in ignore_dirs
-        if any(part in ignore_dirs for part in path.relative_to(repo).parts):
+        if any(part in _HARDCODED_IGNORES for part in path.relative_to(repo).parts):
             continue
         found.add(str(path.relative_to(repo)))
     return found
@@ -114,11 +155,21 @@ def check_ecosystem(repo: Path) -> dict:
     # ── Registry contents ──
     try:
         registry = yaml.safe_load(registry_yaml.read_text())
-    except Exception as e:
+    except yaml.YAMLError as e:
         add("critical", "registry_yaml_parses", "fail", f"Cannot parse registry: {e}")
+        return report
+    except OSError as e:
+        add("critical", "registry_yaml_parses", "fail", f"Cannot read registry: {e}")
         return report
 
     add("info", "registry_yaml_parses", "pass")
+
+    try:
+        check_version(registry.get("version"), SUPPORTED_REGISTRY_VERSIONS, what=str(registry_yaml))
+        add("info", "registry_version_supported", "pass")
+    except VersionMismatch as e:
+        add("critical", "registry_version_supported", "fail", str(e))
+        return report
 
     registered_docs = {d["file"] for d in registry.get("docs", [])}
 
@@ -172,6 +223,36 @@ def check_ecosystem(repo: Path) -> dict:
             "Either update the paths in docs-registry.yaml or fix the repo structure.")
     else:
         add("info", "registry_paths_exist", "pass")
+
+    # ── Stale docs based on last_reviewed and cadence ──
+    today = date.today()
+    stale_docs = []
+    for d in registry.get("docs", []):
+        cadence = d.get("cadence", "")
+        threshold = STALE_THRESHOLDS_DAYS.get(cadence)
+        if threshold is None:
+            continue  # event-driven cadence; no time threshold
+        last_reviewed = d.get("last_reviewed")
+        if not last_reviewed:
+            continue
+        try:
+            reviewed_date = datetime.fromisoformat(str(last_reviewed)).date()
+        except ValueError:
+            continue
+        days_since = (today - reviewed_date).days
+        if days_since > threshold:
+            stale_docs.append((d["file"], cadence, days_since, threshold))
+
+    if stale_docs:
+        details = "; ".join(
+            f"{f} ({cad}, {days}d / {thr}d threshold)"
+            for f, cad, days, thr in stale_docs
+        )
+        add("issue", "docs_not_stale", "fail",
+            f"{len(stale_docs)} doc(s) past their review cadence: {details}. "
+            "Review the content, then update last_reviewed in docs-registry.yaml.")
+    else:
+        add("info", "docs_not_stale", "pass")
 
     # ── State file consistency ──
     if state_file.exists():
@@ -298,15 +379,15 @@ def main(argv: list[str] | None = None) -> int:
 
     repo = Path(args.repo_path).resolve()
     if not repo.exists():
-        print(f"❌ Repo not found: {repo}", file=sys.stderr)
+        log.error(f"Repo not found: {repo}")
         return 2
 
-    print(f"🩺 Examining {repo}", file=sys.stderr)
+    log.info(f"Examining {repo}")
     report = check_ecosystem(repo)
 
     # Optional content validation pass
     if args.full:
-        print("🔬 Running content validation (--full)", file=sys.stderr)
+        log.info("Running content validation (--full)")
         content = run_content_validation(repo)
         report["content_validation"] = content
         if content.get("ran") and content.get("summary"):
@@ -316,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.output:
         Path(args.output).write_text(json.dumps(report, indent=2))
-        print(f"✅ Report written to {args.output}", file=sys.stderr)
+        log.ok(f"Report written to {args.output}")
     elif args.json:
         print(json.dumps(report, indent=2))
     else:

@@ -30,6 +30,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from docs_gen import log
+
 HEADER = """\
 # Docs Audit Log
 
@@ -43,21 +45,30 @@ Never edit old entries — if something was wrong, add a new entry noting the co
 """
 
 
-def init_log(log_path: Path):
+def init_log(log_path: Path, *, dry_run: bool = False) -> int:
     if log_path.exists():
-        print(f"⚠️  {log_path} already exists. Use --append to add entries.")
-        sys.exit(1)
+        log.warn(f"{log_path} already exists. Use --append to add entries.")
+        return 1
+    if dry_run:
+        log.info(f"[dry-run] would initialize audit log at: {log_path}")
+        return 0
     log_path.write_text(HEADER)
-    print(f"✅ Initialized: {log_path}")
+    log.ok(f"Initialized: {log_path}")
+    return 0
 
 
-def append_entry(log_path: Path, docs: str, change: str, trigger: str, reviewer: str):
+def append_entry(log_path: Path, docs: str, change: str, trigger: str, reviewer: str,
+                 *, dry_run: bool = False) -> None:
     today = str(date.today())
     row = f"| {today} | {docs} | {change} | {trigger} | {reviewer} |\n"
 
+    if dry_run:
+        log.info(f"[dry-run] would append to {log_path}: {row.strip()}")
+        return
+
     if not log_path.exists():
         log_path.write_text(HEADER)
-        print(f"ℹ️  Created new log at {log_path}")
+        log.info(f"Created new log at {log_path}")
 
     content = log_path.read_text()
 
@@ -67,18 +78,20 @@ def append_entry(log_path: Path, docs: str, change: str, trigger: str, reviewer:
         content += "|------|--------|--------|---------|----------|\n"
 
     log_path.write_text(content.rstrip() + "\n" + row)
-    print(f"✅ Appended entry to {log_path}")
-    print(f"   Date:     {today}")
-    print(f"   Doc(s):   {docs}")
-    print(f"   Change:   {change}")
-    print(f"   Trigger:  {trigger}")
-    print(f"   Reviewer: {reviewer}")
+    log.ok(f"Appended entry to {log_path}")
+    log.debug(f"  Date:     {today}")
+    log.debug(f"  Doc(s):   {docs}")
+    log.debug(f"  Change:   {change}")
+    log.debug(f"  Trigger:  {trigger}")
+    log.debug(f"  Reviewer: {reviewer}")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Append an entry to DOCS_AUDIT_LOG.md")
     parser.add_argument("--log", default="DOCS_AUDIT_LOG.md", help="Path to audit log file")
     parser.add_argument("--init", action="store_true", help="Initialize a fresh audit log")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print intended write without modifying the filesystem")
     parser.add_argument("--docs", help="Doc filename(s) affected, comma-separated")
     parser.add_argument("--change", help="What changed (or 'Reviewed, no changes needed')")
     parser.add_argument("--trigger", help="What triggered this review (PR #N, sprint, manual, etc.)")
@@ -88,16 +101,17 @@ def main(argv: list[str] | None = None) -> int:
     log_path = Path(args.log)
 
     if args.init:
-        init_log(log_path)
-        return
+        return init_log(log_path, dry_run=args.dry_run)
 
     missing = [f for f in ["docs", "change", "trigger"] if not getattr(args, f)]
     if missing:
-        print(f"❌ Missing required arguments: {', '.join('--' + m for m in missing)}", file=sys.stderr)
+        log.error(f"Missing required arguments: {', '.join('--' + m for m in missing)}")
         parser.print_help(file=sys.stderr)
         return 1
 
-    append_entry(log_path, args.docs, args.change, args.trigger, args.reviewer)
+    append_entry(log_path, args.docs, args.change, args.trigger, args.reviewer,
+                 dry_run=args.dry_run)
+    return 0
 
 
 if __name__ == "__main__":

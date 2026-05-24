@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from docs_gen import config_path
+from docs_gen import config_path, log
 
 
 def load_doc_types(yaml_path: Path) -> dict:
@@ -126,12 +126,16 @@ def main(argv: list[str] | None = None) -> int:
 
     yaml_path = Path(args.doc_types) if args.doc_types else config_path("doc-types.yaml")
     if not yaml_path.exists():
-        print(f"❌ doc-types.yaml not found at {yaml_path}", file=sys.stderr)
+        log.error(f"doc-types.yaml not found at {yaml_path}")
         return 1
 
-    print(f"📋 Loading doc types from {yaml_path}", file=sys.stderr)
-    doc_types_config = load_doc_types(yaml_path)
-    print(f"🔍 Scanning {args.repo_path}", file=sys.stderr)
+    log.info(f"Loading doc types from {yaml_path}")
+    try:
+        doc_types_config = load_doc_types(yaml_path)
+    except yaml.YAMLError as exc:
+        log.error(f"Failed to parse {yaml_path}: {exc}")
+        return 1
+    log.info(f"Scanning {args.repo_path}")
 
     output = scan_repo(args.repo_path, doc_types_config)
     print(json.dumps(output, indent=2))
